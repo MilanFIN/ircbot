@@ -1,6 +1,6 @@
 '''
 ***************************************
-Copyright Milan Mäkipää 2016
+Copyright MilanFIN 2017
 This should at some point act as a simple
 bot for IRCnet channels
 ***************************************
@@ -8,28 +8,38 @@ bot for IRCnet channels
 
 
 
-#import psutil
+
 import socket
 import time
+import re
 
 
 
 class ircBot():
     def __init__(self, network, port, nick, channel):
 
-
-        #storing the parameters
+        #storing the parameters for connecting to server
         self.network = network
         self.port = port
         self.nick = nick
         self.channel = channel
 
+        #name of the process that runs on the host computer, ircbot can check
+        #if it is running
+        self.processName = "firefox.exe"
+        self.processStatus = False
+
+        #store current hour of the day, needed for hourly actions
+        self.previouosHour = time.strftime("%H")
+
         #defining commands that are static, can be added like examples as
-        #command-answer. Commands are recognized as !command from irc
+        #"command": "answer". Commands are recognized as !command from irc
         self.commandDict = {
             "komento": "vastaus 1",
             "komento2": "vastaus2"
         }
+        self.userDict = {}
+        self.currentUsers = []
 
         #connecting here
         self.irc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -40,6 +50,9 @@ class ircBot():
         self.irc.send(("JOIN " + channel + "\r\n").encode())
 
         self.consolePrint("connected")
+
+
+        self.readFile()
     def recieve(self):
         #must be called periodically, otherwice server will cut connection
         try:
@@ -58,60 +71,124 @@ class ircBot():
                 self.send(self.commandDict[command])
                 self.consolePrint("command detected: !" + command)
                 self.consolePrint("answered: " + self.commandDict[command])
-        #topicchange (placeholder)
-        if self.data.find(("PRIVMSG " + self.channel + " :!topic").encode()) != -1:
-            self.topic()
+            #here is test command, delete later
+            if command == "testi":
+                self.fetchUsers()
+                self.updateUserDict()
+                self.writeFile()
+            if command == "uptime":
+                self.upTime()
+        if self.data.decode().find(("JOIN :" + self.channel)) != -1:
+            self.newJoiner()
+
+        #here will be storing the dict to disk...
+        if time.strftime("%H") != self.previouosHour:
+            #aja komento /who # channel, silla saa listan kayttajista
+            #lisaa ne listaan, anna se parametrina writeFilelle
+            pass
 
 
     def send(self, message):
         #sends the parameter message to irc channel
         self.irc.send(('PRIVMSG '+self.channel + ' :' + str(message) + '\r\n').encode())
-
-
-    def topic(self):
-        self.irc.send(('TOPIC '+self.channel + '\r\n').encode())
-        self.data = self.irc.recv (4096)
-        if self.data.find((" testibot " + self.channel + " :").encode()) != -1:
-            strData = self.data.decode()  #str(self.data)
-            startString = self.nick + " " + self.channel + " :"
-            endString = ":"
-
-            dump, topicStartCutted =  strData.split(startString, 1)
-            topic, dump = topicStartCutted.split(endString, 1)
-            self.consolePrint("Current topic is: " + topic)
-
-            if topic.startswith("OFF"): #changing from OFF to ON
-                newTopic = "ON" + topic[3:]
-                self.setTopic(newTopic)
-            elif topic.startswith("ON"): #changing from ON to OFF
-                newTopic = "OFF" + topic[2:]
-                self.setTopic(newTopic)
-            else:
-                self.consolePrint("topic is weird")
-
-
-    def setTopic(self, topic = ""):
-        self.irc.send(("TOPIC " + self.channel + " :" + topic + '\r\n').encode())
-        if topic:
-            self.consolePrint("Attempting to set new topic as: " + topic)
+    def sendCommand(self, command):
+        #sends commands, call without /, ex. /who -> who
+        self.irc.send((command.capitalize() +" "+self.channel+ "\r\n").encode())
+    def newJoiner(self):
+        joinedNick = re.search(r'(:)(.+)(!)', self.data.decode())
+        try:
+            if joinedNick.group(2) != self.nick:
+                self.send("Welcome " + joinedNick.group(2))
+                self.consolePrint("greeted new user: " + joinedNick.group(2))
+        except Exception:
+            pass
     def consolePrint(self, text):
         #prints stuff in a "clean" manner
         output = "["+  time.strftime("%H:%M") + "] " + text
         print(output)
 
+    def fetchUsers(self):
+        ##gets list of nicks currently in the channel and puts them in
+        #self.currentUsers
+        self.currentUsers.clear()
+        self.sendCommand("names")
+        userData = self.irc.recv (4096).decode()
+        splitData = []
+        splitData = userData.split("\n")
+        #print(splitData)
+        for i in splitData:
+            #print(i)
+            if i.find(" :End of NAMES list.") != -1:
+                break
+            beg = i.find(self.channel + " :") + len(self.channel) + 2
+            while True:
+                end = i.find(" ", beg+1)
+                if (end == -1):
+                    break
+                foundUser = i[beg:end].replace("@","").replace("+","")
+                self.currentUsers.append(foundUser)
+                beg = end+1
+        #print(self.currentUsers)
+        self.consolePrint("fetched current users of the channel")
+
+    def updateUserDict(self):
+        ##updates self.userDict with the info in self.currentUsers
+        #adds 1, if nick is in currentUsers,sets value to 0 if new nick
+        for i in self.currentUsers:
+            if (i in self.userDict):
+                self.userDict[i] += 1
+            else:
+                self.userDict[i] = 0
+        self.consolePrint("updated channel user stats")
+    def readFile(self):
+        #reads the userfile to userDict, should be run in startup
+        userFile = open("users.txt", "r")
+        while True:
+            user = userFile.readline().strip("\n")
+            if not user: break
+            if (user.startswith("#")): continue
+            hoursFound = False
+            while True:
+                hours = userFile.readline().strip("\n")
+                if (hours.startswith("#")):
+                    continue
+                if hours:
+                    hoursFound = True
+                break;
+            if not hoursFound: break;
+            if (hours.isdigit()):
+                self.userDict[user] = int(hours)
+        userFile.close()
+        self.consolePrint("userfile loaded for previous statistics")
+    def writeFile(self):
+        #writes userDict values to file, fetchUsers should be called before
+        #this, as it updates the dict contents to match current channel users
+        userFile = open("users.txt", "w")
+        for user, hours in self.userDict.items():
+            userFile.write(user + "\n")
+            userFile.write(str(hours) + "\n")
+        userFile.close()
+        self.consolePrint("saved channel user statistics to userfile")
+    def upTime(self):
+
+        with open('/proc/uptime', 'r') as uptimeFile:
+            seconds = float(uptimeFile.readline().split()[0])
+            uptime = seconds/(3600*24)#str(timedelta(seconds = uptime_seconds))
+        print("uptime is " + uptime + " days")
+
 
 
 #just example parametes
-botti = ircBot("open.ircnet.net", 6667, "testibot", "#ircbottesti")
 
-
-
+botti0 = ircBot("irc.atw-inter.net", 6667, "testibotti", "#omairctesti")
+#botti = ircBot("open.ircnet.net", 6667, "testibot", "#omairctesti")
 
 
 def main():
     while True:
-        botti.recieve()
-        #time.sleep(0.1)
+        botti0.recieve()
+
+        time.sleep(0.1)
 
 
 
