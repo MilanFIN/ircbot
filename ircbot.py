@@ -12,18 +12,19 @@ bot for IRCnet channels
 import socket
 import time
 import re
+import datetime
 
 
 
 class ircBot():
-    def __init__(self, network, port, nick, channel):
+    def __init__(self, network, port, nick, realName, channel):
 
         #storing the parameters for connecting to server
         self.network = network
         self.port = port
         self.nick = nick
         self.channel = channel
-
+        self.realName = realName
         #name of the process that runs on the host computer, ircbot can check
         #if it is running
         self.processName = "firefox.exe"
@@ -31,7 +32,6 @@ class ircBot():
 
         #store current hour of the day, needed for hourly actions
         self.previouosHour = time.strftime("%H")
-
         #defining commands that are static, can be added like examples as
         #"command": "answer". Commands are recognized as !command from irc
         self.commandDict = {
@@ -45,7 +45,7 @@ class ircBot():
         self.irc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.irc.connect((network.encode(), port)) # normally port=6667
         self.data = self.irc.recv (4096)
-        self.irc.send(("USER " + nick + " " + nick +" " + nick + " :python_based_bot!\r\n").encode())
+        self.irc.send(("USER " + nick + " " + nick +" " + nick + " :" + self.realName + "\r\n").encode())
         self.irc.send(("NICK " + nick + "\r\n").encode())
         self.irc.send(("JOIN " + channel + "\r\n").encode())
 
@@ -71,21 +71,16 @@ class ircBot():
                 self.send(self.commandDict[command])
                 self.consolePrint("command detected: !" + command)
                 self.consolePrint("answered: " + self.commandDict[command])
-            #here is test command, delete later
-            if command == "testi":
-                self.fetchUsers()
-                self.updateUserDict()
-                self.writeFile()
             if command == "uptime":
                 self.upTime()
         if self.data.decode().find(("JOIN :" + self.channel)) != -1:
             self.newJoiner()
-
-        #here will be storing the dict to disk...
+        #update user statistics file every hour change
         if time.strftime("%H") != self.previouosHour:
-            #aja komento /who # channel, silla saa listan kayttajista
-            #lisaa ne listaan, anna se parametrina writeFilelle
-            pass
+                self.previousHour = time.strftime("%H")
+                self.fetchUsers()
+                self.updateUserDict()
+                self.writeFile()
 
 
     def send(self, message):
@@ -159,7 +154,7 @@ class ircBot():
             if (hours.isdigit()):
                 self.userDict[user] = int(hours)
         userFile.close()
-        self.consolePrint("userfile loaded for previous statistics")
+        self.consolePrint("loaded user stats")
     def writeFile(self):
         #writes userDict values to file, fetchUsers should be called before
         #this, as it updates the dict contents to match current channel users
@@ -168,19 +163,22 @@ class ircBot():
             userFile.write(user + "\n")
             userFile.write(str(hours) + "\n")
         userFile.close()
-        self.consolePrint("saved channel user statistics to userfile")
+        self.consolePrint("saved user stats to file")
     def upTime(self):
-
+        uptime = 0.0
         with open('/proc/uptime', 'r') as uptimeFile:
             seconds = float(uptimeFile.readline().split()[0])
             uptime = seconds/(3600*24)#str(timedelta(seconds = uptime_seconds))
-        print("uptime is " + uptime + " days")
-
+        ##processUptime = datetime.now() - self.starTime
+        self.send("Host system uptime is " + str(round(uptime, 2)) + " days")
+        self.consolePrint("sent uptime to channel")
 
 
 #just example parametes
 
-botti0 = ircBot("irc.atw-inter.net", 6667, "testibotti", "#omairctesti")
+#give ircBot parameters as: network, port, nick, realname, channel
+#port is int, rest are string
+botti0 = ircBot("irc.atw-inter.net", 6667, "testibot___", "python_bot", "#omairctesti")
 #botti = ircBot("open.ircnet.net", 6667, "testibot", "#omairctesti")
 
 
