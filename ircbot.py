@@ -93,7 +93,10 @@ class ircBot():
         joinedNick = re.search(r'(:)(.+)(!)', self.data.decode())
         try:
             if joinedNick.group(2) != self.nick:
-                self.send("Welcome " + joinedNick.group(2))
+                messageEnding = ""
+                if joinedNick.group(2) in self.userDict:
+                    messageEnding = ". This nick has been seen here for " + str(self.userDict[joinedNick.group(2)]) + "hours."
+                self.send("Welcome " + joinedNick.group(2) + messageEnding)
                 self.consolePrint("greeted new user: " + joinedNick.group(2))
         except Exception:
             pass
